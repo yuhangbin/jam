@@ -30,7 +30,7 @@ user midi data & prompt -> ai -> response midi
 用户可以自己自定义AI来满足自己想要的即兴音乐家（音乐类型，个人风格等属性）
 
 
-## Reference
+## Inspired by
 - [BB King & John Mayer Live | Improv Jam | Part 1](https://www.youtube.com/watch?v=f6dnI1WsFrA)
 - [Jacob Collier x Google MusicFX DJ
 ](https://www.youtube.com/watch?v=IUQW5LgBZvQ&t=6019s)
