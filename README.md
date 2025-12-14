@@ -31,6 +31,6 @@ user midi data & prompt -> ai -> response midi
 
 
 ## Reference
-- 即兴[BB King & John Mayer Live | Improv Jam | Part 1](https://www.youtube.com/watch?v=f6dnI1WsFrA)
+- [BB King & John Mayer Live | Improv Jam | Part 1](https://www.youtube.com/watch?v=f6dnI1WsFrA)
 - [Jacob Collier x Google MusicFX DJ
 ](https://www.youtube.com/watch?v=IUQW5LgBZvQ&t=6019s)
