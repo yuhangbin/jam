@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { TrackCard } from './components/TrackCard';
 import { GeometricControlBar } from './components/GeometricControlBar';
-import { AudioRecorder } from './components/AudioRecorder';
+import { useAudioInput } from './hooks/useAudioInput'; // Import Hook Directly
 import { UploadIcon } from './components/ui/GeometricIcons';
 import { WaveformPlayer } from './components/WaveformPlayer';
 
@@ -13,13 +13,27 @@ interface TrackState {
   isMuted: boolean;
   isSolo: boolean;
   volume: number;
-  audioFile?: File | null;
+  audioFile?: File | Blob | null;
   instrument?: string;
 }
 
 function App() {
+  console.log("App Module Initializing");
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
+  const [resetTrigger, setResetTrigger] = useState(0); // Sync reset
+
+  useEffect(() => {
+    console.log("App Mounted");
+  }, []);
+
+  // Audio Input Hook
+  const {
+    isRecording,
+    startRecording,
+    stopRecording,
+    audioBlob,
+    stream // Get MediaStream
+  } = useAudioInput();
 
   // Project State
   const [bpm, setBpm] = useState(120);
@@ -34,8 +48,16 @@ function App() {
   ]);
 
   const updateTrack = (id: string, updates: Partial<TrackState>) => {
-    setTracks(tracks.map(t => t.id === id ? { ...t, ...updates } : t));
+    setTracks(tracks => tracks.map(t => t.id === id ? { ...t, ...updates } : t));
   };
+
+  // Handle Recorded Audio
+  useEffect(() => {
+    if (audioBlob) {
+      console.log("Audio Recorded:", audioBlob);
+      updateTrack('2', { audioFile: audioBlob });
+    }
+  }, [audioBlob]);
 
   const handleBacktrackUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -48,9 +70,30 @@ function App() {
     }
   };
 
-  const handlePlay = () => {
-    setIsPlaying(!isPlaying);
-    if (!isPlaying) setIsRecording(false);
+  const handlePlayToggle = () => {
+    if (isPlaying) {
+      setIsPlaying(false);
+      // If recording, stop it too? Usually yes.
+      if (isRecording) stopRecording();
+    } else {
+      setIsPlaying(true);
+    }
+  };
+
+  const handleRecordToggle = () => {
+    if (isRecording) {
+      stopRecording();
+      setIsPlaying(false); // Stop playback when recording stops
+    } else {
+      startRecording();
+      setIsPlaying(true); // Start playback when recording starts (Sync)
+    }
+  };
+
+  const handleStop = () => {
+    setIsPlaying(false);
+    if (isRecording) stopRecording();
+    setResetTrigger(prev => prev + 1); // Trigger Reset
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -124,10 +167,42 @@ function App() {
             >
               {/* Visualization Children */}
               {track.type === 'USER' && (
-                <div className="w-full h-full p-2 opacity-80 flex items-center justify-center">
-                  <div className="text-xs text-pink-300 font-mono tracking-widest uppercase opacity-70">Waiting for Input...</div>
+                <div className="w-full h-full relative group/wave flex items-center">
+                  {/* If recording or has file, show WaveformPlayer */}
+                  {/* If recording or has file, show WaveformPlayer */}
+                  {(isRecording || track.audioFile) ? (
+                    <div className="w-full px-4 flex flex-col gap-2">
+                      <WaveformPlayer
+                        key={isRecording ? 'recording' : 'playback'} // Force Remount
+                        audioFile={track.audioFile}
+                        micStream={isRecording ? stream : null} // Pass stream if recording
+                        isRecording={isRecording}
+                        isPlaying={isPlaying}
+                        resetTrigger={resetTrigger}
+                        volume={track.volume} // Pass volume
+                        isMuted={track.isMuted} // Pass mute
+                        height={96}
+                        waveColor={isRecording ? "rgba(236, 72, 153, 0.8)" : "rgba(236, 72, 153, 0.4)"} // Brighter when recording
+                        progressColor="rgba(236, 72, 153, 0.8)"
+                      />
+                      {track.audioFile && !isRecording && (
+                        <a
+                          href={URL.createObjectURL(track.audioFile)}
+                          download="debug-recording.webm"
+                          className="text-[10px] text-pink-500/50 hover:text-pink-500 hover:underline self-end"
+                        >
+                          Debug: Download Audio
+                        </a>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="w-full h-full p-2 opacity-80 flex items-center justify-center">
+                      <div className="text-xs text-pink-300 font-mono tracking-widest uppercase opacity-70">Waiting for Input...</div>
+                    </div>
+                  )}
                 </div>
               )}
+
               {track.type === 'BACKTRACK' && (
                 <div className="w-full h-full relative group/wave flex items-center">
                   {track.audioFile ? (
@@ -135,6 +210,9 @@ function App() {
                       <WaveformPlayer
                         audioFile={track.audioFile}
                         isPlaying={isPlaying}
+                        resetTrigger={resetTrigger}
+                        volume={track.volume} // Pass volume
+                        isMuted={track.isMuted} // Pass mute
                         height={96}
                         waveColor="rgba(16, 185, 129, 0.4)"
                         progressColor="rgba(16, 185, 129, 0.8)"
@@ -178,11 +256,6 @@ function App() {
             </TrackCard>
           </div>
         ))}
-
-        {/* Hidden Recorder Logic */}
-        <div className="hidden">
-          <AudioRecorder />
-        </div>
       </div>
 
       {/* Bottom Control Bar */}
@@ -190,9 +263,9 @@ function App() {
         <GeometricControlBar
           isPlaying={isPlaying}
           isRecording={isRecording}
-          onPlay={handlePlay}
-          onStop={() => { setIsPlaying(false); setIsRecording(false); }}
-          onRecord={() => setIsRecording(!isRecording)}
+          onPlay={handlePlayToggle}
+          onStop={handleStop}
+          onRecord={handleRecordToggle}
           bpm={bpm}
           duration={duration}
           musicalKey={musicalKey}
