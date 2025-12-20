@@ -5,7 +5,7 @@ A music jam playground.
 ## MVP
 ### User Story
 采用音乐即兴中[call and response模式](https://en.wikipedia.org/wiki/Call_and_response_(music))作为设计原型。基于伴奏，用户进行即兴，
-而AI会做出回应。
+而AI做出回应。
 
 三个音轨
 1. backtrack （伴奏音轨）
