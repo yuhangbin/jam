@@ -88,7 +88,7 @@ export const getAudioMetadata = async (file: File | Blob): Promise<AudioMetadata
 /**
  * 4. 对音频轨道进行分割存储 放到一个有序集合中，分割的规则是 有声音到没声音 为一段
  */
-export const segmentAudio = (buffer: AudioBuffer, threshold = 0.01, minSegmentDuration = 0.1): AudioSegment[] => {
+export const segmentAudio = (buffer: AudioBuffer, threshold = 0.005, minSegmentDuration = 0.1): AudioSegment[] => {
     const data = buffer.getChannelData(0); // Use mono for analysis
     const sampleRate = buffer.sampleRate;
     const windowSize = Math.floor(sampleRate * 0.05); // 50ms window
@@ -212,4 +212,33 @@ export const midiToAudio = async (midiNotes: any[]): Promise<Blob> => {
 
     // Convert Tone.AudioBuffer to a standard AudioBuffer-like structure for the helper
     return bufferToWave(buffer.get() as unknown as AudioBuffer);
+};
+/**
+ * Helper to normalize AudioBuffer to peak 1.0
+ */
+export const normalizeAudioBuffer = (buffer: AudioBuffer): AudioBuffer => {
+    for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+        const data = buffer.getChannelData(channel);
+        let max = 0;
+        for (let i = 0; i < data.length; i++) {
+            const abs = Math.abs(data[i]);
+            if (abs > max) max = abs;
+        }
+        if (max > 0 && max < 1) {
+            const ratio = 1.0 / max;
+            for (let i = 0; i < data.length; i++) {
+                data[i] *= ratio;
+            }
+        }
+    }
+    return buffer;
+};
+
+/**
+ * Helper to convert AudioBuffer to a Blob URL for WaveSurfer
+ */
+export const audioBufferToBlobUrl = (buffer: AudioBuffer): string => {
+    const normalized = normalizeAudioBuffer(buffer);
+    const blob = bufferToWave(normalized);
+    return URL.createObjectURL(blob);
 };

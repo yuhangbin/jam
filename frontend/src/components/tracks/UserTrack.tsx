@@ -2,8 +2,11 @@ import React from 'react';
 import { WaveformPlayer } from '../WaveformPlayer';
 import { JAM_CONFIG } from '../../config';
 
+import type { AudioObject } from '../../types';
+
 interface UserTrackProps {
     audioFile: File | Blob | null | undefined;
+    audioObjects?: AudioObject[];
     isRecording: boolean;
     isPlaying: boolean;
     stream: MediaStream | null;
@@ -11,6 +14,7 @@ interface UserTrackProps {
     volume: number;
     isMuted: boolean;
     currentTime?: number;
+    totalDuration?: number;
     availableDevices: MediaDeviceInfo[];
     selectedDeviceId: string;
     onDeviceChange: (deviceId: string) => void;
@@ -18,6 +22,7 @@ interface UserTrackProps {
 
 export const UserTrack: React.FC<UserTrackProps> = ({
     audioFile,
+    audioObjects,
     isRecording,
     isPlaying,
     stream,
@@ -25,29 +30,63 @@ export const UserTrack: React.FC<UserTrackProps> = ({
     volume,
     isMuted,
     currentTime,
+    totalDuration,
     availableDevices,
     selectedDeviceId,
     onDeviceChange
 }) => {
     return (
-        <div className="w-full h-full relative group/wave flex flex-col px-4 py-2">
+        <div className="w-full h-full relative group/wave flex flex-col">
             <div className="flex-1 min-h-0 relative">
-                {(isRecording || audioFile) ? (
+                {isRecording && (
                     <WaveformPlayer
-                        key={isRecording ? 'recording' : 'playback'}
+                        key="recording"
+                        micStream={stream}
+                        isRecording={true}
+                        isPlaying={isPlaying}
+                        height={80}
+                        waveColor={JAM_CONFIG.THEME.USER.RECORDING}
+                        progressColor={JAM_CONFIG.THEME.USER.PROGRESS}
+                        currentTime={currentTime}
+                    />
+                )}
+                {audioObjects && audioObjects.length > 0 && (
+                    <div className="absolute inset-0">
+                        {audioObjects.map(obj => (
+                            <WaveformPlayer
+                                key={obj.id}
+                                audioBuffer={obj.buffer}
+                                isPlaying={isPlaying}
+                                resetTrigger={resetTrigger}
+                                volume={volume}
+                                isMuted={isMuted}
+                                height={80}
+                                waveColor={JAM_CONFIG.THEME.USER.WAVE}
+                                progressColor={JAM_CONFIG.THEME.USER.PROGRESS}
+                                currentTime={currentTime}
+                                totalDuration={totalDuration}
+                                startTime={obj.startTime}
+                                duration={obj.duration}
+                            />
+                        ))}
+                    </div>
+                )}
+                {!isRecording && !audioObjects && audioFile && (
+                    <WaveformPlayer
+                        key="legacy-playback"
                         audioFile={audioFile}
-                        micStream={isRecording ? stream : null}
-                        isRecording={isRecording}
                         isPlaying={isPlaying}
                         resetTrigger={resetTrigger}
                         volume={volume}
                         isMuted={isMuted}
                         height={80}
-                        waveColor={isRecording ? JAM_CONFIG.THEME.USER.RECORDING : JAM_CONFIG.THEME.USER.WAVE}
+                        waveColor={JAM_CONFIG.THEME.USER.WAVE}
                         progressColor={JAM_CONFIG.THEME.USER.PROGRESS}
                         currentTime={currentTime}
+                        totalDuration={totalDuration}
                     />
-                ) : (
+                )}
+                {!isRecording && !audioFile && (!audioObjects || audioObjects.length === 0) && (
                     <div className="w-full h-full p-2 opacity-80 flex items-center justify-center">
                         <div className="text-xs text-pink-300 font-mono tracking-widest uppercase opacity-70 animate-pulse">
                             Waiting for Recording Input...

@@ -1,28 +1,62 @@
 import React from 'react';
 
+import type { AudioObject } from '../../types';
+import { WaveformPlayer } from '../WaveformPlayer';
+import { JAM_CONFIG } from '../../config';
+
 interface AiTrackProps {
+    audioObjects?: AudioObject[];
+    isPlaying: boolean;
+    currentTime?: number;
+    totalDuration?: number;
+    volume: number;
+    isMuted: boolean;
+    resetTrigger: number;
     instrument: string | undefined;
     onInstrumentChange: (instrument: string) => void;
 }
 
 export const AiTrack: React.FC<AiTrackProps> = ({
+    audioObjects = [],
+    isPlaying,
+    currentTime,
+    totalDuration,
+    volume,
+    isMuted,
+    resetTrigger,
     instrument,
     onInstrumentChange
 }) => {
     return (
-        <div className="w-full h-full flex flex-col gap-3 px-4 py-2">
-            <div className="flex-1 flex items-center gap-[3px] h-16 justify-center opacity-60">
-                {Array.from({ length: 48 }).map((_, i) => (
-                    <div
-                        key={i}
-                        className="flex-1 bg-blue-500 rounded-full animate-pulse"
-                        style={{
-                            height: `${Math.random() * 60 + 20}%`,
-                            animationDelay: `${i * 0.05}s`,
-                            animationDuration: '1.5s'
-                        }}
-                    ></div>
-                ))}
+        <div className="w-full h-full flex flex-col relative">
+            <div className="flex-1 relative min-h-[64px]">
+                {audioObjects.length > 0 ? (
+                    <div className="absolute inset-0">
+                        {audioObjects.map(obj => (
+                            <WaveformPlayer
+                                key={obj.id}
+                                audioBuffer={obj.buffer}
+                                isPlaying={isPlaying}
+                                resetTrigger={resetTrigger}
+                                volume={volume}
+                                isMuted={isMuted}
+                                height={64}
+                                waveColor={JAM_CONFIG.THEME.AI.WAVE}
+                                progressColor={JAM_CONFIG.THEME.AI.PROGRESS}
+                                currentTime={currentTime}
+                                totalDuration={totalDuration}
+                                startTime={obj.startTime}
+                                duration={obj.duration}
+                            />
+                        ))}
+                    </div>
+                ) : (
+                    <div className="w-full h-full p-2 opacity-80 flex items-center justify-center">
+                        <div className="text-xs text-blue-300 font-mono tracking-widest uppercase opacity-70 animate-pulse">
+                            Waiting for User Melody...
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="flex items-center justify-between">

@@ -1,5 +1,4 @@
-import React from 'react';
-import { PlayTriangle, StopSquare, RecordCircle, PauseIcon } from './ui/GeometricIcons';
+import { PlayTriangle, StopSquare, RecordCircle, PauseIcon, TrashIcon } from './ui/GeometricIcons';
 
 interface GeometricControlBarProps {
     isPlaying: boolean;
@@ -7,9 +6,11 @@ interface GeometricControlBarProps {
     onPlay: () => void;
     onStop: () => void;
     onRecord: () => void;
+    onClear: () => void;
     bpm: number;
     duration: string;
     musicalKey: string;
+    onKeyChange: (val: string) => void;
 }
 
 export const GeometricControlBar: React.FC<GeometricControlBarProps> = ({
@@ -18,14 +19,28 @@ export const GeometricControlBar: React.FC<GeometricControlBarProps> = ({
     onPlay,
     onStop,
     onRecord,
+    onClear,
     bpm,
     duration,
-    musicalKey
+    musicalKey,
+    onKeyChange
 }) => {
     return (
         <div className="h-24 flex items-center justify-center gap-8">
             {/* Transport */}
             <div className="flex items-center gap-6">
+                <button
+                    type="button"
+                    onClick={(e) => {
+                        e.preventDefault();
+                        onClear();
+                    }}
+                    className="text-white/20 hover:text-red-400 transition-all hover:scale-110 active:scale-95 ml-2 p-1 rounded-md"
+                    title="Clear Session"
+                >
+                    <TrashIcon className="w-5 h-5 pointer-events-none" />
+                </button>
+
                 <button
                     onClick={onStop}
                     className="text-gray-400 hover:text-white transition-transform hover:scale-110 active:scale-95"
@@ -65,7 +80,16 @@ export const GeometricControlBar: React.FC<GeometricControlBarProps> = ({
                 </div>
                 <div className="flex flex-col">
                     <span className="text-gray-500 text-[10px] uppercase tracking-widest">Key</span>
-                    <span className="text-xl font-bold">{musicalKey}</span>
+                    <select
+                        value={musicalKey}
+                        onChange={(e) => onKeyChange(e.target.value)}
+                        className="bg-transparent border-none outline-none text-xl font-bold focus:text-purple-400 transition-colors cursor-pointer appearance-none"
+                    >
+                        {["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"].flatMap(root => [
+                            <option key={`${root} Maj`} value={`${root} Maj`} className="bg-gray-900">{root} Maj</option>,
+                            <option key={`${root} Min`} value={`${root} Min`} className="bg-gray-900">{root} Min</option>
+                        ])}
+                    </select>
                 </div>
                 <div className="flex flex-col">
                     <span className="text-gray-500 text-[10px] uppercase tracking-widest">Duration</span>

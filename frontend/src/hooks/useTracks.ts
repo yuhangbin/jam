@@ -1,6 +1,8 @@
 import { useState, useCallback } from 'react';
 import { JAM_CONFIG } from '../config';
 
+import type { AudioObject } from '../types';
+
 export interface TrackState {
     id: string;
     name: string;
@@ -10,6 +12,7 @@ export interface TrackState {
     isSolo: boolean;
     volume: number;
     audioFile?: File | Blob | null;
+    audioObjects?: AudioObject[];
     instrument?: string;
 }
 
@@ -64,6 +67,7 @@ export const useTracks = () => {
 
     return {
         tracks,
+        setTracks,
         updateTrack,
         resetTracks
     };

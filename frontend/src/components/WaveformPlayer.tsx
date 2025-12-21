@@ -3,9 +3,11 @@ import WaveSurfer from 'wavesurfer.js';
 import RecordPlugin from 'wavesurfer.js/dist/plugins/record.esm.js';
 // @ts-ignore
 import MusicTempo from 'music-tempo';
+import { audioBufferToBlobUrl } from '../utils/audioProcessing';
 
 interface WaveformPlayerProps {
     audioFile?: File | Blob | null;
+    audioBuffer?: AudioBuffer | null;
     micStream?: MediaStream | null;
     isPlaying: boolean;
     isRecording?: boolean;
@@ -18,10 +20,14 @@ interface WaveformPlayerProps {
     volume?: number;
     isMuted?: boolean;
     currentTime?: number; // External sync time
+    startTime?: number;   // Coordinate on the timeline
+    duration?: number;    // Length of this specific fragment
+    totalDuration?: number; // Total timeline duration for percentage-based width
 }
 
 export const WaveformPlayer = ({
     audioFile,
+    audioBuffer,
     micStream,
     isPlaying,
     isRecording = false,
@@ -33,7 +39,10 @@ export const WaveformPlayer = ({
     resetTrigger = 0,
     volume = 1,
     isMuted = false,
-    currentTime
+    currentTime,
+    startTime = 0,
+    duration: fragmentDuration,
+    totalDuration = 300 // Default 5 mins
 }: WaveformPlayerProps) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [wavesurfer, setWavesurfer] = useState<WaveSurfer | null>(null);
@@ -62,13 +71,13 @@ export const WaveformPlayer = ({
             container: containerRef.current,
             height: height,
             waveColor: waveColor,
-            progressColor: progressColor,
-            cursorColor: 'rgba(255,255,255,0.5)',
-            barWidth: 2,
-            barGap: 3,
-            barRadius: 2,
+            progressColor: 'transparent', // Hide progress on the fragment itself
+            cursorWidth: 0, // Disable internal cursor
+            barWidth: 1,
+            barGap: 1,
+            barRadius: 0,
             normalize: true,
-            minPxPerSec: 50, // Stretches the waveform for better visibility
+            minPxPerSec: 10, // Lower minPxPerSec to allow container to control width without forced scrolling
             fillParent: true,
             plugins: plugins,
         });
@@ -139,28 +148,51 @@ export const WaveformPlayer = ({
         }
     }, [volume, isMuted, wavesurfer]);
 
-    // External Sync Effect
+    // Precise Audio Sync Effect
     useEffect(() => {
-        if (wavesurfer && currentTime !== undefined && !isRecording) {
-            // Only sync if the difference is significant (>50ms) to avoid jitter
+        if (!wavesurfer || isRecording || currentTime === undefined) return;
+
+        const relativeTime = currentTime - startTime;
+        const dur = fragmentDuration || wavesurfer.getDuration();
+
+        // 1. Seek to correct position
+        if (relativeTime >= 0 && relativeTime <= dur) {
             const wsTime = wavesurfer.getCurrentTime();
-            if (Math.abs(wsTime - currentTime) > 0.05) {
-                wavesurfer.setTime(currentTime);
+            if (Math.abs(wsTime - relativeTime) > 0.05) {
+                wavesurfer.setTime(relativeTime);
+            }
+
+            // 2. Play/Pause based on global state
+            if (isPlaying && !wavesurfer.isPlaying()) {
+                wavesurfer.play();
+            } else if (!isPlaying && wavesurfer.isPlaying()) {
+                wavesurfer.pause();
+            }
+        } else {
+            // Outside fragment range
+            if (wavesurfer.isPlaying()) wavesurfer.pause();
+            if (relativeTime < 0 && wavesurfer.getCurrentTime() !== 0) {
+                wavesurfer.setTime(0);
             }
         }
-    }, [currentTime, wavesurfer, isRecording]);
+    }, [currentTime, wavesurfer, isRecording, startTime, fragmentDuration, isPlaying]);
 
-    // 2. Load Audio File (if provided)
+    // 2. Load Audio File or Buffer
     useEffect(() => {
-        if (audioFile && wavesurfer) {
-            const url = URL.createObjectURL(audioFile);
-            console.log("Loading Audio Blob into WaveSurfer:", url);
-            wavesurfer.load(url);
-
-            // Removed cleanup revokeURL to prevent race conditions during React StrictMode mount/unmount cycles
-            // The browser will clean up blob URLs on reload/close.
+        if (wavesurfer) {
+            if (audioFile) {
+                const url = URL.createObjectURL(audioFile);
+                wavesurfer.load(url);
+            } else if (audioBuffer) {
+                const url = audioBufferToBlobUrl(audioBuffer);
+                wavesurfer.load(url);
+                // The URL is created inside audioBufferToBlobUrl, 
+                // but WaveSurfer handles the loading.
+            }
         }
-    }, [audioFile, wavesurfer]);
+    }, [audioFile, audioBuffer, wavesurfer]);
+
+    // Removed the problematic manual bufferToBlob helper
 
     // 3. Handle Mic Stream Visualization
     useEffect(() => {
@@ -209,15 +241,23 @@ export const WaveformPlayer = ({
         }
     }, [resetTrigger, wavesurfer]);
 
-    // Toggle Play removed as it is unused for now
+    const widthPct = fragmentDuration ? (fragmentDuration / totalDuration) * 100 : 100;
+    const leftPct = (startTime / totalDuration) * 100;
 
     return (
-        <div className="w-full h-full flex flex-col items-center justify-center relative">
-            {/* Use a class to style scrollbars if needed, or hide them for clean look */}
+        <div
+            className="h-full flex flex-col items-center justify-center relative overflow-hidden pointer-events-none"
+            style={{
+                position: startTime > 0 || (fragmentDuration !== undefined) ? 'absolute' : 'relative',
+                left: `${leftPct}%`,
+                width: `${widthPct}%`,
+                zIndex: isRecording ? 20 : 10
+            }}
+        >
             <div
                 ref={containerRef}
-                className="w-full relative z-10 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/40 transition-colors"
-                style={{ overflowX: 'auto', overflowY: 'hidden' }}
+                className="w-full relative z-10"
+                style={{ overflow: 'hidden' }}
             />
         </div>
     );
