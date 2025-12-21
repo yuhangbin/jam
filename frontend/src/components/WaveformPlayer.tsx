@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import WaveSurfer from 'wavesurfer.js';
-import TimelinePlugin from 'wavesurfer.js/dist/plugins/timeline.esm.js';
 import RecordPlugin from 'wavesurfer.js/dist/plugins/record.esm.js';
 // @ts-ignore
 import MusicTempo from 'music-tempo';
@@ -18,6 +17,7 @@ interface WaveformPlayerProps {
     resetTrigger?: number; // Increment to trigger reset
     volume?: number;
     isMuted?: boolean;
+    currentTime?: number; // External sync time
 }
 
 export const WaveformPlayer = ({
@@ -32,7 +32,8 @@ export const WaveformPlayer = ({
     onFinish,
     resetTrigger = 0,
     volume = 1,
-    isMuted = false
+    isMuted = false,
+    currentTime
 }: WaveformPlayerProps) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [wavesurfer, setWavesurfer] = useState<WaveSurfer | null>(null);
@@ -43,20 +44,7 @@ export const WaveformPlayer = ({
         if (!containerRef.current) return;
         console.log("WaveformPlayer: Initializing", { isRecording, micStream: !!micStream, audioFile: !!audioFile });
 
-        const plugins: any[] = [
-            TimelinePlugin.create({
-                container: containerRef.current,
-                insertPosition: 'beforebegin',
-                height: 20,
-                style: {
-                    color: 'rgba(255,255,255,0.4)',
-                    fontSize: '10px',
-                },
-                timeInterval: 5,
-                primaryLabelInterval: 5,
-                secondaryLabelInterval: 1,
-            })
-        ];
+        const plugins: any[] = [];
 
         // Only add RecordPlugin if we have a mic stream (Recording Mode)
         // This prevents crash/overhead in Playback mode
@@ -80,7 +68,7 @@ export const WaveformPlayer = ({
             barGap: 3,
             barRadius: 2,
             normalize: true,
-            minPxPerSec: 0, // Fit to container by default to ensure visibility
+            minPxPerSec: 50, // Stretches the waveform for better visibility
             fillParent: true,
             plugins: plugins,
         });
@@ -150,6 +138,17 @@ export const WaveformPlayer = ({
             wavesurfer.setVolume(isMuted ? 0 : volume);
         }
     }, [volume, isMuted, wavesurfer]);
+
+    // External Sync Effect
+    useEffect(() => {
+        if (wavesurfer && currentTime !== undefined && !isRecording) {
+            // Only sync if the difference is significant (>50ms) to avoid jitter
+            const wsTime = wavesurfer.getCurrentTime();
+            if (Math.abs(wsTime - currentTime) > 0.05) {
+                wavesurfer.setTime(currentTime);
+            }
+        }
+    }, [currentTime, wavesurfer, isRecording]);
 
     // 2. Load Audio File (if provided)
     useEffect(() => {

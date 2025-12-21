@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { JAM_CONFIG } from '../config';
 
 interface AudioInputState {
     isRecording: boolean;
@@ -8,6 +9,9 @@ interface AudioInputState {
     audioBlob: Blob | null;
     audioUrl: string | null;
     stream: MediaStream | null;
+    recordingDuration: number;
+    availableDevices: MediaDeviceInfo[];
+    selectedDeviceId: string;
 }
 
 export const useAudioInput = () => {
@@ -18,30 +22,54 @@ export const useAudioInput = () => {
         volume: 0,
         audioBlob: null,
         audioUrl: null,
-        stream: null
+        stream: null,
+        recordingDuration: 0,
+        availableDevices: [],
+        selectedDeviceId: 'default'
     });
 
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
-
-    const audioContextRef = useRef<AudioContext | null>(null);
-    const analyserRef = useRef<AnalyserNode | null>(null);
-    const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-    const rafRef = useRef<number | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
+    const timerRef = useRef<any>(null);
+    const baseState = useRef({ isRecording: false });
+
+    const refreshDevices = useCallback(async () => {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioInputs = devices.filter(device => device.kind === 'audioinput');
+            setState(prev => ({ ...prev, availableDevices: audioInputs }));
+        } catch (err) {
+            console.error("Error enumerating devices:", err);
+        }
+    }, []);
+
+    const setSelectedDeviceId = useCallback((deviceId: string) => {
+        setState(prev => ({ ...prev, selectedDeviceId: deviceId }));
+    }, []);
+
+    const stopRecording = useCallback(() => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+        }
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+        }
+        baseState.current.isRecording = false;
+    }, []);
 
     const startRecording = useCallback(async () => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const constraints: MediaStreamConstraints = {
+                audio: {
+                    deviceId: state.selectedDeviceId !== 'default' ? { exact: state.selectedDeviceId } : undefined
+                }
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
             streamRef.current = stream;
+            baseState.current.isRecording = true;
 
-            // Helper ref to avoid closure staleness in RAF if we used state directly, 
-            // though cancellation usually sufficient.
-            baseState.current = { ...baseState.current, isRecording: true };
-
-            setState(prev => ({ ...prev, stream }));
-
-            // MediaRecorder Setup
             const mediaRecorder = new MediaRecorder(stream);
             mediaRecorderRef.current = mediaRecorder;
             chunksRef.current = [];
@@ -49,33 +77,19 @@ export const useAudioInput = () => {
             mediaRecorder.ondataavailable = (e) => {
                 if (e.data.size > 0) {
                     chunksRef.current.push(e.data);
-                    console.log("Chunk received", e.data.size);
                 }
             };
 
             mediaRecorder.onstop = () => {
-                // Use the actual mime type of the recorder
                 const mimeType = mediaRecorder.mimeType || 'audio/webm';
-                console.log("Recorder Stopped. MimeType:", mimeType);
-
                 const blob = new Blob(chunksRef.current, { type: mimeType });
-                console.log("Blob created. Size:", blob.size);
                 const url = URL.createObjectURL(blob);
 
-                // Cleanup tracks with a small delay to allow UI/RecordPlugin to unmount first
-                // This prevents "source node" errors or browser freezes
                 setTimeout(() => {
                     if (streamRef.current) {
                         streamRef.current.getTracks().forEach(track => track.stop());
-                        console.log("MediaStream tracks stopped safely.");
                     }
                 }, 500);
-
-                // These are now unused/commented out in start(), so they will be null/no-op
-                if (sourceRef.current) sourceRef.current.disconnect();
-                if (analyserRef.current) analyserRef.current.disconnect();
-                if (audioContextRef.current) audioContextRef.current.close();
-                if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
                 setState(prev => ({
                     ...prev,
@@ -83,89 +97,56 @@ export const useAudioInput = () => {
                     audioBlob: blob,
                     audioUrl: url,
                     stream: null,
-                    pitch: null,
-                    volume: 0
                 }));
-
-                baseState.current = { ...baseState.current, isRecording: false };
             };
 
-            mediaRecorder.start(); // No timeslice to ensure single valid header/file for better decoding compatibility
+            mediaRecorder.start(1000); // Capture chunks every 1 second for robustness
+            setState(prev => ({
+                ...prev,
+                isRecording: true,
+                audioBlob: null,
+                audioUrl: null,
+                stream,
+                recordingDuration: 0
+            }));
 
-            // Analysis Setup (Disabled to prevent main thread blocking/freezing)
-            /* 
-            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-            audioContextRef.current = audioContext;
+            // Start duration timer
+            let duration = 0;
+            timerRef.current = setInterval(() => {
+                duration += 1;
+                setState(prev => ({ ...prev, recordingDuration: duration }));
 
-            const analyser = audioContext.createAnalyser();
-            analyser.fftSize = 2048;
-            analyserRef.current = analyser;
-
-            const source = audioContext.createMediaStreamSource(stream);
-            source.connect(analyser);
-            sourceRef.current = source;
-
-            const detectPitch = YIN({ sampleRate: audioContext.sampleRate });
-            const buffer = new Float32Array(analyser.fftSize);
-
-            const update = () => {
-                if (!baseState.current.isRecording) return; // Stop loop check
-
-                analyser.getFloatTimeDomainData(buffer);
-
-                // Calculate volume (RMS)
-                let sum = 0;
-                for (let i = 0; i < buffer.length; i++) {
-                    sum += buffer[i] * buffer[i];
+                if (duration >= JAM_CONFIG.MAX_DURATION) {
+                    console.warn("[useAudioInput] Max duration reached, stopping recording.");
+                    stopRecording();
                 }
-                const rms = Math.sqrt(sum / buffer.length);
+            }, 1000);
 
-                if (rms > 0.01) {
-                    const pitchData = detectPitch(buffer);
-                    setState(prev => ({
-                        ...prev,
-                        isRecording: true,
-                        pitch: pitchData as number,
-                        volume: rms
-                    }));
-                } else {
-                    setState(prev => ({ ...prev, pitch: null, volume: rms, isRecording: true }));
-                }
-
-                rafRef.current = requestAnimationFrame(update);
-            };
-
-            // Initial state set to recording
-            setState(prev => ({ ...prev, isRecording: true, audioBlob: null, audioUrl: null }));
-
-            // Use a ref to check isRecording in loop if needed, or just rely on RAF cancellation
-            baseState.current = { ...baseState.current, isRecording: true };
-
-            update(); 
-            */
-
-            // Simple state update instead of loop
-            baseState.current = { ...baseState.current, isRecording: true };
-            setState(prev => ({ ...prev, isRecording: true, audioBlob: null, audioUrl: null, stream, pitch: null, volume: 0 }));
         } catch (err) {
             console.error("Error accessing microphone:", err);
+            setState(prev => ({ ...prev, isRecording: false }));
         }
-    }, []);
+    }, [stopRecording, state.selectedDeviceId]);
 
-    const stopRecording = useCallback(() => {
-        // Stop MediaRecorder (logic will trigger onstop)
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            mediaRecorderRef.current.stop();
-        }
-    }, []);
+    // Cleanup and Device Refresh on mount
+    useEffect(() => {
+        refreshDevices();
+        navigator.mediaDevices.addEventListener('devicechange', refreshDevices);
 
-    // Helper ref to avoid closure staleness in RAF if we used state directly, 
-    // though cancellation usually sufficient.
-    const baseState = useRef({ isRecording: false });
+        return () => {
+            navigator.mediaDevices.removeEventListener('devicechange', refreshDevices);
+            if (timerRef.current) clearInterval(timerRef.current);
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop());
+            }
+        };
+    }, [refreshDevices]);
 
     return {
         ...state,
         startRecording,
-        stopRecording
+        stopRecording,
+        setSelectedDeviceId,
+        refreshDevices
     };
 };

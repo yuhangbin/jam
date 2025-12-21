@@ -1,117 +1,127 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { TrackCard } from './components/TrackCard';
 import { GeometricControlBar } from './components/GeometricControlBar';
-import { useAudioInput } from './hooks/useAudioInput'; // Import Hook Directly
-import { UploadIcon } from './components/ui/GeometricIcons';
-import { WaveformPlayer } from './components/WaveformPlayer';
+import { useAudioInput } from './hooks/useAudioInput';
+import { useTracks } from './hooks/useTracks';
+import { JAM_CONFIG } from './config';
 
-interface TrackState {
-  id: string;
-  name: string;
-  type: 'BACKTRACK' | 'USER' | 'AI';
-  color: string;
-  isMuted: boolean;
-  isSolo: boolean;
-  volume: number;
-  audioFile?: File | Blob | null;
-  instrument?: string;
-}
+// Individual Track Components
+import { BacktrackTrack } from './components/tracks/BacktrackTrack';
+import { UserTrack } from './components/tracks/UserTrack';
+import { AiTrack } from './components/tracks/AiTrack';
 
 function App() {
-  console.log("App Module Initializing");
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [resetTrigger, setResetTrigger] = useState(0); // Sync reset
-
-  useEffect(() => {
-    console.log("App Mounted");
-  }, []);
-
-  // Audio Input Hook
+  const { tracks, updateTrack } = useTracks();
   const {
     isRecording,
     startRecording,
     stopRecording,
     audioBlob,
-    stream // Get MediaStream
+    stream,
+    recordingDuration,
+    availableDevices,
+    selectedDeviceId,
+    setSelectedDeviceId
   } = useAudioInput();
 
-  // Project State
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [resetTrigger, setResetTrigger] = useState(0);
   const [bpm, setBpm] = useState(120);
-  const [duration, setDuration] = useState("03:45");
+  const [duration, setDuration] = useState("00:00");
   const [musicalKey, setMusicalKey] = useState("C Maj");
-
-  // Track State
-  const [tracks, setTracks] = useState<TrackState[]>([
-    { id: '1', name: 'Original Backtrack', type: 'BACKTRACK', color: '#10b981', isMuted: false, isSolo: false, volume: 0.8 },
-    { id: '2', name: 'My Improvisation', type: 'USER', color: '#ec4899', isMuted: false, isSolo: false, volume: 1.0 },
-    { id: '3', name: 'AI Accompaniment', type: 'AI', color: '#3b82f6', isMuted: false, isSolo: false, volume: 0.8, instrument: 'Grand Piano' },
-  ]);
-
-  const updateTrack = (id: string, updates: Partial<TrackState>) => {
-    setTracks(tracks => tracks.map(t => t.id === id ? { ...t, ...updates } : t));
-  };
+  const [syncTime, setSyncTime] = useState(0);
 
   // Handle Recorded Audio
   useEffect(() => {
     if (audioBlob) {
-      console.log("Audio Recorded:", audioBlob);
       updateTrack('2', { audioFile: audioBlob });
     }
-  }, [audioBlob]);
+  }, [audioBlob, updateTrack]);
 
-  const handleBacktrackUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      console.log("Uploaded:", file.name);
-      setDuration("04:20"); // Mock
-      setBpm(128); // Mock
-      setMusicalKey("Dm"); // Mock
-      updateTrack('1', { audioFile: file, name: file.name.replace(/\.[^/.]+$/, "") });
+  // Sync Timer: Driven by App state during playback
+  useEffect(() => {
+    let interval: any;
+    if (isPlaying && !isRecording) {
+      interval = setInterval(() => {
+        setSyncTime(prev => prev + 0.1);
+      }, 100);
+    } else if (!isPlaying) {
+      setSyncTime(0);
     }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isPlaying, isRecording]);
+
+  // Handle Backtrack Upload with duration limit
+  const handleBacktrackUpload = async (file: File) => {
+    // Use a temporary audio element to check duration
+    const audio = new Audio();
+    audio.src = URL.createObjectURL(file);
+
+    audio.onloadedmetadata = () => {
+      URL.revokeObjectURL(audio.src);
+      if (audio.duration > JAM_CONFIG.MAX_DURATION) {
+        alert(`File too long! Maximum jam duration is ${JAM_CONFIG.MAX_DURATION / 60} minutes.`);
+        return;
+      }
+
+      updateTrack('1', {
+        audioFile: file,
+        name: file.name.replace(/\.[^/.]+$/, "")
+      });
+    };
   };
 
-  const handlePlayToggle = () => {
+  const handlePlayToggle = useCallback(() => {
     if (isPlaying) {
       setIsPlaying(false);
-      // If recording, stop it too? Usually yes.
       if (isRecording) stopRecording();
     } else {
       setIsPlaying(true);
     }
-  };
+  }, [isPlaying, isRecording, stopRecording]);
 
-  const handleRecordToggle = () => {
+  const handleRecordToggle = useCallback(() => {
     if (isRecording) {
       stopRecording();
-      setIsPlaying(false); // Stop playback when recording stops
+      setIsPlaying(false);
     } else {
       startRecording();
-      setIsPlaying(true); // Start playback when recording starts (Sync)
+      setIsPlaying(true);
     }
-  };
+  }, [isRecording, startRecording, stopRecording]);
 
-  const handleStop = () => {
+  const handleStop = useCallback(() => {
     setIsPlaying(false);
     if (isRecording) stopRecording();
-    setResetTrigger(prev => prev + 1); // Trigger Reset
-  };
+    setResetTrigger(prev => prev + 1);
+    setSyncTime(0);
+  }, [isRecording, stopRecording]);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Format recording duration for UI if needed
+  const formattedRecordingTime = `${Math.floor(recordingDuration / 60).toString().padStart(2, '0')}:${(recordingDuration % 60).toString().padStart(2, '0')}`;
 
   return (
     <div className="h-screen w-full flex flex-col p-8 gap-8">
-      {/* Top Header */}
       <header className="flex justify-between items-center px-4 shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.5)]"></div>
           <h1 className="text-xl font-bold tracking-tight text-white/90">JAM <span className="font-light opacity-50">SPACE</span></h1>
         </div>
-        <button className="text-xs font-semibold text-white/50 hover:text-white transition-colors">
-          SETTINGS
-        </button>
+        <div className="flex items-center gap-4">
+          {isRecording && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-red-500/20 rounded-full border border-red-500/40 animate-pulse">
+              <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+              <span className="text-[10px] font-bold text-red-500 font-mono">{formattedRecordingTime}</span>
+            </div>
+          )}
+          <button className="text-xs font-semibold text-white/50 hover:text-white transition-colors">
+            SETTINGS
+          </button>
+        </div>
       </header>
 
-      {/* Main Track Area */}
       <div className="flex-1 flex flex-col justify-center max-w-[90%] mx-auto w-full gap-5 perspective-1000 overflow-y-auto pr-2 custom-scrollbar">
         {tracks.map((track, index) => (
           <div
@@ -131,134 +141,53 @@ function App() {
               onSoloToggle={() => updateTrack(track.id, { isSolo: !track.isSolo })}
               onVolumeChange={(val) => updateTrack(track.id, { volume: val })}
               onNameChange={(val) => updateTrack(track.id, { name: val })}
-              extraControls={
-                <>
-                  {track.type === 'BACKTRACK' && (
-                    <>
-                      <input
-                        type="file"
-                        ref={fileInputRef}
-                        className="hidden"
-                        accept="audio/*"
-                        onChange={handleBacktrackUpload}
-                      />
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="w-full text-left px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-[11px] font-medium text-emerald-400 transition-colors flex items-center gap-2 border border-white/5"
-                      >
-                        <UploadIcon className="w-3 h-3" />
-                        Upload File
-                      </button>
-                    </>
-                  )}
-                  {track.type === 'AI' && (
-                    <select
-                      value={track.instrument}
-                      onChange={(e) => updateTrack(track.id, { instrument: e.target.value })}
-                      className="w-full bg-black/20 border border-white/10 rounded px-2 py-1 text-[11px] outline-none focus:border-blue-500 text-blue-300"
-                    >
-                      <option value="Grand Piano">Grand Piano</option>
-                      <option value="Synth Pad">Synth Pad</option>
-                      <option value="Electric Guitar">Electric Guitar</option>
-                    </select>
-                  )}
-                </>
-              }
             >
-              {/* Visualization Children */}
-              {track.type === 'USER' && (
-                <div className="w-full h-full relative group/wave flex items-center">
-                  {/* If recording or has file, show WaveformPlayer */}
-                  {/* If recording or has file, show WaveformPlayer */}
-                  {(isRecording || track.audioFile) ? (
-                    <div className="w-full px-4 flex flex-col gap-2">
-                      <WaveformPlayer
-                        key={isRecording ? 'recording' : 'playback'} // Force Remount
-                        audioFile={track.audioFile}
-                        micStream={isRecording ? stream : null} // Pass stream if recording
-                        isRecording={isRecording}
-                        isPlaying={isPlaying}
-                        resetTrigger={resetTrigger}
-                        volume={track.volume} // Pass volume
-                        isMuted={track.isMuted} // Pass mute
-                        height={96}
-                        waveColor={isRecording ? "rgba(236, 72, 153, 0.8)" : "rgba(236, 72, 153, 0.4)"} // Brighter when recording
-                        progressColor="rgba(236, 72, 153, 0.8)"
-                      />
-                      {track.audioFile && !isRecording && (
-                        <a
-                          href={URL.createObjectURL(track.audioFile)}
-                          download="debug-recording.webm"
-                          className="text-[10px] text-pink-500/50 hover:text-pink-500 hover:underline self-end"
-                        >
-                          Debug: Download Audio
-                        </a>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="w-full h-full p-2 opacity-80 flex items-center justify-center">
-                      <div className="text-xs text-pink-300 font-mono tracking-widest uppercase opacity-70">Waiting for Input...</div>
-                    </div>
-                  )}
-                </div>
+              {track.type === 'BACKTRACK' && (
+                <BacktrackTrack
+                  audioFile={track.audioFile}
+                  isPlaying={isPlaying}
+                  resetTrigger={resetTrigger}
+                  volume={track.volume}
+                  isMuted={track.isMuted}
+                  currentTime={syncTime}
+                  onReady={({ bpm: detectedBpm, duration: detectedDuration }) => {
+                    setBpm(detectedBpm);
+                    const mins = Math.floor(detectedDuration / 60).toString().padStart(2, '0');
+                    const secs = Math.floor(detectedDuration % 60).toString().padStart(2, '0');
+                    setDuration(`${mins}:${secs}`);
+                  }}
+                  onFinish={() => setIsPlaying(false)}
+                  onUpload={handleBacktrackUpload}
+                />
               )}
 
-              {track.type === 'BACKTRACK' && (
-                <div className="w-full h-full relative group/wave flex items-center">
-                  {track.audioFile ? (
-                    <div className="w-full px-4">
-                      <WaveformPlayer
-                        audioFile={track.audioFile}
-                        isPlaying={isPlaying}
-                        resetTrigger={resetTrigger}
-                        volume={track.volume} // Pass volume
-                        isMuted={track.isMuted} // Pass mute
-                        height={96}
-                        waveColor="rgba(16, 185, 129, 0.4)"
-                        progressColor="rgba(16, 185, 129, 0.8)"
-                        onReady={({ bpm, duration }) => {
-                          setBpm(bpm); // Update global project BPM
-                          const mins = Math.floor(duration / 60).toString().padStart(2, '0');
-                          const secs = Math.floor(duration % 60).toString().padStart(2, '0');
-                          setDuration(`${mins}:${secs}`);
-                        }}
-                        onFinish={() => setIsPlaying(false)}
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-full flex items-center gap-[2px] h-32 px-2 items-end justify-center opacity-40 grayscale">
-                      {/* Placeholder Waveform */}
-                      {Array.from({ length: 64 }).map((_, i) => (
-                        <div key={i} className="flex-1 bg-white/20 rounded-t-sm" style={{ height: `${Math.max(10, Math.sin(i * 0.2) * 30 + 20)}%` }}></div>
-                      ))}
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <span className="text-xs font-mono text-white/50 tracking-widest uppercase">Upload Audio to Visualize</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
+              {track.type === 'USER' && (
+                <UserTrack
+                  audioFile={track.audioFile}
+                  isRecording={isRecording}
+                  isPlaying={isPlaying}
+                  stream={stream}
+                  resetTrigger={resetTrigger}
+                  volume={track.volume}
+                  isMuted={track.isMuted}
+                  currentTime={syncTime}
+                  availableDevices={availableDevices}
+                  selectedDeviceId={selectedDeviceId}
+                  onDeviceChange={setSelectedDeviceId}
+                />
               )}
+
               {track.type === 'AI' && (
-                <div className="w-full flex items-center gap-[3px] h-24 px-4 items-center justify-center opacity-60">
-                  {Array.from({ length: 32 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className="flex-1 bg-blue-500 rounded-full animate-pulse"
-                      style={{
-                        height: `${Math.random() * 60 + 10}%`,
-                        animationDelay: `${i * 0.1}s`,
-                        animationDuration: '2s'
-                      }}
-                    ></div>
-                  ))}
-                </div>
+                <AiTrack
+                  instrument={track.instrument}
+                  onInstrumentChange={(val) => updateTrack(track.id, { instrument: val })}
+                />
               )}
             </TrackCard>
           </div>
         ))}
       </div>
 
-      {/* Bottom Control Bar */}
       <div className="shrink-0 mb-4">
         <GeometricControlBar
           isPlaying={isPlaying}
