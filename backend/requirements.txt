@@ -1,3 +1,10 @@
 fastapi
 uvicorn
 pydantic
+websockets
+librosa
+numpy
+scipy
+mido
+pydub
+python-multipart
